@@ -125,3 +125,46 @@ class TestAuth:
         assert route.called
 
         await client.close()
+
+
+class TestDataMethods:
+    """Test high-level data access methods."""
+
+    @pytest.fixture
+    def authed_client(self):
+        c = WebUntisClient("test.webuntis.com", "test-school", "user", "pass")
+        c._session_id = "SID"
+        c._session_expiry = time.time() + 9999
+        c._person_id = 42
+        c._person_type = 5
+        return c
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_get_timetable_sends_correct_params(self, authed_client):
+        """get_timetable must send id, type, startDate, endDate as YYYYMMDD ints."""
+        route = respx.post(
+            "https://test.webuntis.com/WebUntis/jsonrpc.do",
+            params={"school": "test-school"},
+        ).mock(return_value=httpx.Response(200, json={
+            "jsonrpc": "2.0", "id": "1",
+            "result": [{"id": 1, "date": 20260320, "startTime": 800}],
+        }))
+
+        result = await authed_client.get_timetable(42, 5, "2026-03-20", "2026-03-26")
+
+        body = json.loads(route.calls[0].request.content)
+        assert body["method"] == "getTimetable"
+        assert body["params"]["id"] == 42
+        assert body["params"]["type"] == 5
+        assert body["params"]["startDate"] == 20260320
+        assert body["params"]["endDate"] == 20260326
+        assert result == [{"id": 1, "date": 20260320, "startTime": 800}]
+
+        await authed_client.close()
+
+
+class TestHelpers:
+    def test_to_untis_date(self):
+        assert WebUntisClient._to_untis_date("2026-03-20") == 20260320
+        assert WebUntisClient._to_untis_date("2026-01-01") == 20260101

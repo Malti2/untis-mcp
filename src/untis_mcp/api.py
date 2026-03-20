@@ -139,3 +139,79 @@ class WebUntisClient:
     @property
     def person_type(self) -> int | None:
         return self._person_type
+
+    # ── Date Helpers ─────────────────────────────────────────────
+
+    @staticmethod
+    def _to_untis_date(iso_date: str) -> int:
+        """Convert 'YYYY-MM-DD' to YYYYMMDD integer."""
+        return int(iso_date.replace("-", ""))
+
+    # ── JSON-RPC Data Methods ────────────────────────────────────
+
+    async def get_timetable(
+        self, person_id: int, person_type: int, start: str, end: str
+    ) -> list[dict[str, Any]]:
+        """Fetch timetable for a person in a date range."""
+        await self.ensure_authenticated()
+        result = await self._jsonrpc("getTimetable", {
+            "id": person_id,
+            "type": person_type,
+            "startDate": self._to_untis_date(start),
+            "endDate": self._to_untis_date(end),
+        })
+        return result if isinstance(result, list) else []
+
+    async def get_substitutions(self, start: str, end: str) -> list[dict[str, Any]]:
+        """Fetch substitutions (Vertretungen) for a date range."""
+        await self.ensure_authenticated()
+        result = await self._jsonrpc("getSubstitutions", {
+            "startDate": self._to_untis_date(start),
+            "endDate": self._to_untis_date(end),
+            "departmentId": 0,
+        })
+        return result if isinstance(result, list) else []
+
+    async def get_teachers(self) -> list[dict[str, Any]]:
+        await self.ensure_authenticated()
+        result = await self._jsonrpc("getTeachers")
+        return result if isinstance(result, list) else []
+
+    async def get_subjects(self) -> list[dict[str, Any]]:
+        await self.ensure_authenticated()
+        result = await self._jsonrpc("getSubjects")
+        return result if isinstance(result, list) else []
+
+    async def get_rooms(self) -> list[dict[str, Any]]:
+        await self.ensure_authenticated()
+        result = await self._jsonrpc("getRooms")
+        return result if isinstance(result, list) else []
+
+    async def get_klassen(self) -> list[dict[str, Any]]:
+        await self.ensure_authenticated()
+        result = await self._jsonrpc("getKlassen")
+        return result if isinstance(result, list) else []
+
+    async def get_holidays(self) -> list[dict[str, Any]]:
+        await self.ensure_authenticated()
+        result = await self._jsonrpc("getHolidays")
+        return result if isinstance(result, list) else []
+
+    async def get_timegrid(self) -> list[dict[str, Any]]:
+        await self.ensure_authenticated()
+        result = await self._jsonrpc("getTimegridUnits")
+        return result if isinstance(result, list) else []
+
+    async def get_current_schoolyear(self) -> dict[str, Any]:
+        await self.ensure_authenticated()
+        result = await self._jsonrpc("getCurrentSchoolyear")
+        return result if isinstance(result, dict) else {}
+
+    async def get_exams_rpc(self, start: str, end: str) -> list[dict[str, Any]]:
+        """Fetch exams via JSON-RPC (less detailed than REST)."""
+        await self.ensure_authenticated()
+        result = await self._jsonrpc("getExams", {
+            "startDate": self._to_untis_date(start),
+            "endDate": self._to_untis_date(end),
+        })
+        return result if isinstance(result, list) else []
