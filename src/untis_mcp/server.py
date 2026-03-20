@@ -63,6 +63,14 @@ def _next_school_day(today: date) -> date:
     return nxt
 
 
+def _format_untis_date(d: Any) -> str:
+    """Format a YYYYMMDD integer or string to DD.MM.YYYY."""
+    s = str(d)
+    if len(s) == 8 and s.isdigit():
+        return f"{s[6:8]}.{s[4:6]}.{s[0:4]}"
+    return s
+
+
 # ── Input Models ────────────────────────────────────────────────
 
 
@@ -137,6 +145,10 @@ async def get_students(ctx: Context) -> str:
     client = _get_client(ctx)
     await client.ensure_authenticated()
 
+    # For parent accounts, return child students; otherwise the logged-in person
+    if client.students:
+        return _format_json(client.students)
+
     students = []
     if client.person_id is not None:
         students.append({
@@ -206,18 +218,18 @@ async def get_timetable(params: TimetableInput, ctx: Context) -> str:
     client = _get_client(ctx)
     await client.ensure_authenticated()
 
-    pid = params.student_id or client.person_id
-    ptype = client.person_type or 5
+    pid = params.student_id or client.student_id
+    ptype = client.student_type
     start = params.start_date or date.today().isoformat()
     end = params.end_date or (
         date.fromisoformat(start) + timedelta(days=6)
     ).isoformat()
 
     try:
-        timetable = await client.get_timetable(pid, ptype, start, end)
+        data = await client.get_timetable_enriched(pid, ptype, start, end)
         substitutions = await client.get_substitutions(start, end)
         return _format_json({
-            "timetable": timetable,
+            "timetable": data["periods"],
             "substitutions": substitutions,
         })
     except Exception as e:
@@ -428,10 +440,13 @@ def _format_daily_report(
 
     # ── Homework ──────────────────────────────────────────────
     hw_list = []
+    hw_lessons: dict[int, str] = {}  # lessonId -> subject name
     if isinstance(homework, dict):
-        hw_list = homework.get("data", {}).get("homeworks", [])
-        if not hw_list:
-            hw_list = homework.get("homeworks", [])
+        hw_data = homework.get("data", homework)
+        hw_list = hw_data.get("homeworks", [])
+        # Build lesson->subject lookup
+        for lesson in hw_data.get("lessons", []):
+            hw_lessons[lesson.get("id", 0)] = lesson.get("subject", "?")
     elif isinstance(homework, list):
         hw_list = homework
 
@@ -558,7 +573,7 @@ def _format_daily_report(
     lines.append("### Klausuren & Tests (naechste 7 Tage)")
     if exam_list:
         for ex in exam_list:
-            ex_date = ex.get("examDate", "?")
+            ex_date = _format_untis_date(ex.get("examDate", "?"))
             subj = ex.get("subject", ex.get("name", "?"))
             ex_type = ex.get("examType", "Test")
             lines.append(f"- **{ex_date}**: {subj} ({ex_type})")
@@ -570,9 +585,11 @@ def _format_daily_report(
     lines.append("### Hausaufgaben (naechste 7 Tage)")
     if hw_list:
         for h in hw_list:
-            subj = h.get("subject", "?")
+            # Subject from lesson lookup, or direct field
+            subj = h.get("subject", hw_lessons.get(h.get("lessonId", 0), "?"))
             text = h.get("text", h.get("description", ""))
-            due = h.get("dueDate", "")
+            due_raw = h.get("dueDate", "")
+            due = _format_untis_date(due_raw) if due_raw else ""
             lines.append(f"- **{subj}**: {text}" + (f" (bis {due})" if due else ""))
     else:
         lines.append("- Keine Hausaufgaben eingetragen")
@@ -583,7 +600,7 @@ def _format_daily_report(
     if absence_list:
         for a in absence_list:
             status = "entschuldigt" if a.get("isExcused", False) else "unentschuldigt"
-            a_date = a.get("date", a.get("startDate", "?"))
+            a_date = _format_untis_date(a.get("date", a.get("startDate", "?")))
             lines.append(f"- {a_date}: {status}")
     else:
         lines.append("- Keine Fehlzeiten")
@@ -620,7 +637,7 @@ async def daily_report(ctx: Context) -> str:
     client = _get_client(ctx)
     await client.ensure_authenticated()
 
-    if client.person_id is None:
+    if client.student_id is None:
         return "Kein Schueler-Profil gefunden."
 
     today = date.today()
@@ -629,10 +646,11 @@ async def daily_report(ctx: Context) -> str:
 
     # Fetch all data
     try:
-        timetable = await client.get_timetable(
-            client.person_id, client.person_type or 5,
+        enriched = await client.get_timetable_enriched(
+            client.student_id, client.student_type,
             tomorrow.isoformat(), tomorrow.isoformat(),
         )
+        timetable = enriched["periods"]
     except Exception:
         timetable = []
 
@@ -674,7 +692,7 @@ async def daily_report(ctx: Context) -> str:
     parts.append(f"# Eltern-Briefing ({today.strftime('%d.%m.%Y')})")
     parts.append("")
     parts.append(_format_daily_report(
-        client.person_id, client.person_type or 5,
+        client.student_id, client.student_type,
         tomorrow, timetable, substitutions,
         homework, exams, absences, messages,
     ))

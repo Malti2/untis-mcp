@@ -42,13 +42,18 @@ async def run():
         tomorrow = _next_school_day(today)
         exam_end = (today + timedelta(days=7)).isoformat()
 
-        timetable = await client.get_timetable(
-            client.person_id, client.person_type or 5,
+        enriched = await client.get_timetable_enriched(
+            client.student_id, client.student_type,
             tomorrow.isoformat(), tomorrow.isoformat(),
         )
-        substitutions = await client.get_substitutions(
-            tomorrow.isoformat(), tomorrow.isoformat(),
-        )
+        timetable = enriched["periods"]
+        substitutions = []
+        try:
+            substitutions = await client.get_substitutions(
+                tomorrow.isoformat(), tomorrow.isoformat(),
+            )
+        except Exception:
+            pass
 
         homework, exams, absences, messages = {}, {}, {}, {}
         try:
@@ -71,7 +76,7 @@ async def run():
         print(f"# Eltern-Briefing ({today.strftime('%d.%m.%Y')})")
         print()
         print(_format_daily_report(
-            client.person_id, client.person_type or 5,
+            client.student_id, client.student_type,
             tomorrow, timetable, substitutions,
             homework, exams, absences, messages,
         ))

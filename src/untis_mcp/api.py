@@ -40,6 +40,9 @@ class WebUntisClient:
         self._rpc_id: int = 0
         self._http: httpx.AsyncClient | None = None
 
+        # Children (for parent accounts, personType=12)
+        self._students: list[dict[str, Any]] = []
+
     async def _client(self) -> httpx.AsyncClient:
         if self._http is None or self._http.is_closed:
             self._http = httpx.AsyncClient(
@@ -100,6 +103,31 @@ class WebUntisClient:
             domain=self.server, path="/WebUntis",
         )
         await self._fetch_jwt_token()
+        await self._fetch_students()
+
+    async def _fetch_students(self) -> None:
+        """Fetch child/student info for parent accounts via REST."""
+        if self._jwt_token:
+            try:
+                data = await self._rest_get_raw("/api/rest/view/v1/app/data")
+                user = data.get("user", {})
+                students = user.get("students", [])
+                self._students = [
+                    {"personId": s["id"], "personType": 5, "displayName": s.get("displayName", "")}
+                    for s in students
+                ]
+            except Exception:
+                self._students = []
+
+    async def _rest_get_raw(self, path: str) -> Any:
+        """GET a REST endpoint (no ensure_authenticated, used during login)."""
+        client = await self._client()
+        headers = {}
+        if self._jwt_token:
+            headers["Authorization"] = f"Bearer {self._jwt_token}"
+        resp = await client.get(f"{self._base_url}{path}", headers=headers)
+        resp.raise_for_status()
+        return resp.json()
 
     async def _fetch_jwt_token(self) -> None:
         """Obtain a JWT Bearer token for REST API endpoints."""
@@ -139,6 +167,25 @@ class WebUntisClient:
     @property
     def person_type(self) -> int | None:
         return self._person_type
+
+    @property
+    def students(self) -> list[dict[str, Any]]:
+        """Return child/student list (populated for parent accounts)."""
+        return self._students
+
+    @property
+    def student_id(self) -> int | None:
+        """Return the first child's student ID, or person_id for student accounts."""
+        if self._students:
+            return self._students[0]["personId"]
+        return self._person_id
+
+    @property
+    def student_type(self) -> int:
+        """Return 5 (student) for child accounts, or person_type for student accounts."""
+        if self._students:
+            return 5
+        return self._person_type or 5
 
     # ── Date Helpers ─────────────────────────────────────────────
 
@@ -275,3 +322,76 @@ class WebUntisClient:
     async def get_news(self) -> Any:
         """Fetch school news via REST API."""
         return await self._rest_get("/api/public/news/newsWidgetData")
+
+    async def get_timetable_enriched(
+        self, person_id: int, person_type: int, start: str, end: str
+    ) -> dict[str, Any]:
+        """Fetch timetable with subject/teacher/room names resolved.
+
+        Uses the public weekly timetable API which returns an elements lookup
+        alongside lesson periods. Returns a dict with 'periods' (lessons with
+        resolved names) and 'elements' (raw lookup data).
+        """
+        await self.ensure_authenticated()
+        date_str = start  # The API returns a full week around this date
+        try:
+            data = await self._rest_get(
+                "/api/public/timetable/weekly/data",
+                {"elementType": person_type, "elementId": person_id, "date": date_str},
+            )
+            result = data.get("data", {}).get("result", {}).get("data", {})
+        except Exception:
+            # Fall back to plain JSON-RPC timetable
+            lessons = await self.get_timetable(person_id, person_type, start, end)
+            return {"periods": lessons, "elements": {}}
+
+        # Build element lookup: (type, id) -> element dict
+        elements_list = result.get("elements", [])
+        elem_lookup: dict[tuple[int, int], dict[str, Any]] = {}
+        for e in elements_list:
+            elem_lookup[(e["type"], e["id"])] = e
+
+        # Enrich periods with names
+        period_dict = result.get("elementPeriods", {})
+        periods: list[dict[str, Any]] = []
+        for _pid, p_list in period_dict.items():
+            for p in p_list:
+                p_date = p.get("date", 0)
+                start_int = self._to_untis_date(start)
+                end_int = self._to_untis_date(end)
+                if p_date < start_int or p_date > end_int:
+                    continue
+
+                # Resolve element refs to named entries
+                su, te, ro, kl = [], [], [], []
+                for ref in p.get("elements", []):
+                    etype, eid = ref["type"], ref["id"]
+                    elem = elem_lookup.get((etype, eid), {})
+                    entry = {"id": eid, "name": elem.get("name", "?"), "longName": elem.get("longName", "")}
+                    if etype == 3:    # subject
+                        su.append(entry)
+                    elif etype == 2:  # teacher
+                        te.append(entry)
+                    elif etype == 4:  # room
+                        ro.append(entry)
+                    elif etype == 1:  # class
+                        kl.append(entry)
+
+                periods.append({
+                    "id": p.get("id"),
+                    "date": p_date,
+                    "startTime": p.get("startTime"),
+                    "endTime": p.get("endTime"),
+                    "su": su,
+                    "te": te,
+                    "ro": ro,
+                    "kl": kl,
+                    "lessonCode": p.get("lessonCode", ""),
+                    "substText": p.get("substText", ""),
+                    "lstext": p.get("lessonText", ""),
+                    "activityType": p.get("activityType", ""),
+                    "code": p.get("code", ""),
+                })
+
+        periods.sort(key=lambda x: (x.get("date", 0), x.get("startTime", 0)))
+        return {"periods": periods, "elements": elem_lookup}
