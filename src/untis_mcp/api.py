@@ -215,3 +215,63 @@ class WebUntisClient:
             "endDate": self._to_untis_date(end),
         })
         return result if isinstance(result, list) else []
+
+    # ── REST/WebAPI Methods ──────────────────────────────────────
+
+    async def _rest_get(self, path: str, params: dict[str, Any] | None = None) -> Any:
+        """Make an authenticated GET to a REST endpoint."""
+        await self.ensure_authenticated()
+        client = await self._client()
+
+        headers = {}
+        if self._jwt_token:
+            headers["Authorization"] = f"Bearer {self._jwt_token}"
+
+        resp = await client.get(
+            f"{self._base_url}{path}",
+            params=params,
+            headers=headers,
+        )
+
+        if resp.status_code == 401:
+            # Re-authenticate and retry
+            await self.login()
+            if self._jwt_token:
+                headers["Authorization"] = f"Bearer {self._jwt_token}"
+            resp = await client.get(
+                f"{self._base_url}{path}",
+                params=params,
+                headers=headers,
+            )
+
+        resp.raise_for_status()
+        return resp.json()
+
+    async def get_homework(self, start: str, end: str) -> Any:
+        """Fetch homework assignments via REST API."""
+        return await self._rest_get("/api/homeworks/lessons", {
+            "startDate": self._to_untis_date(start),
+            "endDate": self._to_untis_date(end),
+        })
+
+    async def get_exams(self, start: str, end: str) -> Any:
+        """Fetch exams via REST API (more detailed than JSON-RPC)."""
+        return await self._rest_get("/api/exams", {
+            "startDate": self._to_untis_date(start),
+            "endDate": self._to_untis_date(end),
+        })
+
+    async def get_absences(self, start: str, end: str) -> Any:
+        """Fetch student absences via REST API."""
+        return await self._rest_get("/api/classreg/absences/students", {
+            "startDate": self._to_untis_date(start),
+            "endDate": self._to_untis_date(end),
+        })
+
+    async def get_messages(self) -> Any:
+        """Fetch inbox messages via REST API."""
+        return await self._rest_get("/api/rest/view/v1/messages")
+
+    async def get_news(self) -> Any:
+        """Fetch school news via REST API."""
+        return await self._rest_get("/api/public/news/newsWidgetData")

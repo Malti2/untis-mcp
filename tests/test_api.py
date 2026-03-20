@@ -168,3 +168,75 @@ class TestHelpers:
     def test_to_untis_date(self):
         assert WebUntisClient._to_untis_date("2026-03-20") == 20260320
         assert WebUntisClient._to_untis_date("2026-01-01") == 20260101
+
+
+class TestRestEndpoints:
+    """Test REST/WebAPI endpoint methods."""
+
+    @pytest.fixture
+    def authed_client(self):
+        c = WebUntisClient("test.webuntis.com", "test-school", "user", "pass")
+        c._session_id = "SID"
+        c._session_expiry = time.time() + 9999
+        c._person_id = 42
+        c._person_type = 5
+        c._jwt_token = "jwt-abc"
+        return c
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_get_homework_uses_jwt_bearer(self, authed_client):
+        """REST endpoints must use Bearer token in Authorization header."""
+        route = respx.get(
+            "https://test.webuntis.com/WebUntis/api/homeworks/lessons",
+        ).mock(return_value=httpx.Response(200, json={
+            "data": {"homeworks": [{"id": 1, "text": "Read chapter 5"}]},
+        }))
+
+        result = await authed_client.get_homework("2026-03-20", "2026-03-27")
+
+        assert route.called
+        auth_header = route.calls[0].request.headers.get("Authorization")
+        assert auth_header == "Bearer jwt-abc"
+
+        # Check query params use YYYYMMDD format
+        url = str(route.calls[0].request.url)
+        assert "startDate=20260320" in url
+        assert "endDate=20260327" in url
+
+        await authed_client.close()
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_rest_retries_on_401(self, authed_client):
+        """REST calls must re-authenticate and retry on 401."""
+        call_count = 0
+
+        def handler(request):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return httpx.Response(401)
+            return httpx.Response(200, json={"data": []})
+
+        respx.get(
+            "https://test.webuntis.com/WebUntis/api/rest/view/v1/messages",
+        ).mock(side_effect=handler)
+
+        # Mock login for re-auth
+        respx.post(
+            "https://test.webuntis.com/WebUntis/jsonrpc.do",
+            params={"school": "test-school"},
+        ).mock(return_value=httpx.Response(200, json={
+            "jsonrpc": "2.0", "id": "1",
+            "result": {"sessionId": "NEW", "personId": 42, "personType": 5},
+        }))
+        respx.get(
+            "https://test.webuntis.com/WebUntis/api/token/new",
+        ).mock(return_value=httpx.Response(200, text='"new-jwt"'))
+
+        result = await authed_client.get_messages()
+        assert call_count == 2  # first 401, then retry
+        assert result == {"data": []}
+
+        await authed_client.close()
