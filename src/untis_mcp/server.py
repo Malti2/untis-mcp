@@ -373,6 +373,315 @@ async def raw_call(method: str, parameters: str, ctx: Context) -> str:
         return f"Error: {e}"
 
 
+# ── Daily Report Formatting ─────────────────────────────────────
+
+
+def _format_daily_report(
+    person_id: int,
+    person_type: int,
+    tomorrow: date,
+    timetable: list,
+    substitutions: list,
+    homework: Any,
+    exams: Any,
+    absences: Any,
+    messages: Any,
+) -> str:
+    """Build a Markdown daily briefing."""
+    tom_str = tomorrow.strftime("%d.%m.%Y")
+    wd = WEEKDAYS_DE[tomorrow.weekday()]
+    tom_date_int = int(tomorrow.strftime("%Y%m%d"))
+
+    lines: list[str] = []
+    lines.append(f"## Schueler (ID {person_id})")
+    lines.append("")
+
+    # ── Tomorrow's lessons ────────────────────────────────────
+    tom_lessons = [l for l in timetable if l.get("date") == tom_date_int]
+    tom_lessons.sort(key=lambda l: l.get("startTime", 0))
+
+    # Build substitution lookup: (date, startTime) -> substitution
+    sub_lookup: dict[tuple[int, int], dict] = {}
+    for sub in substitutions:
+        key = (sub.get("date", 0), sub.get("startTime", 0))
+        sub_lookup[key] = sub
+
+    # Classify lessons
+    regular_subjects: list[str] = []
+    cancellations: list[str] = []
+    substitution_subjects: list[str] = []
+
+    for lesson in tom_lessons:
+        subjects = lesson.get("su", [])
+        subj_name = subjects[0].get("name", "?") if subjects else "?"
+
+        key = (lesson.get("date", 0), lesson.get("startTime", 0))
+        sub = sub_lookup.get(key)
+
+        if sub and sub.get("type") == "cancel":
+            cancellations.append(subj_name)
+        elif sub:
+            substitution_subjects.append(subj_name)
+            regular_subjects.append(subj_name)
+        else:
+            regular_subjects.append(subj_name)
+
+    # ── Homework ──────────────────────────────────────────────
+    hw_list = []
+    if isinstance(homework, dict):
+        hw_list = homework.get("data", {}).get("homeworks", [])
+        if not hw_list:
+            hw_list = homework.get("homeworks", [])
+    elif isinstance(homework, list):
+        hw_list = homework
+
+    # ── Exams ─────────────────────────────────────────────────
+    exam_list = []
+    if isinstance(exams, dict):
+        exam_list = exams.get("data", {}).get("exams", [])
+        if not exam_list:
+            exam_list = exams.get("exams", [])
+    elif isinstance(exams, list):
+        exam_list = exams
+    exam_list = sorted(exam_list, key=lambda e: e.get("examDate", 0))
+
+    # ── Absences ──────────────────────────────────────────────
+    absence_list = []
+    if isinstance(absences, dict):
+        absence_list = absences.get("data", {}).get("absences", [])
+        if not absence_list:
+            absence_list = absences.get("absences", [])
+    elif isinstance(absences, list):
+        absence_list = absences
+
+    # ── Messages ──────────────────────────────────────────────
+    msg_list = []
+    if isinstance(messages, dict):
+        msg_list = messages.get("data", {}).get("messages", [])
+        if not msg_list:
+            msg_list = messages.get("messages", [])
+    elif isinstance(messages, list):
+        msg_list = messages
+
+    unread = [m for m in msg_list if not m.get("isRead", True)]
+
+    # ── Summary ("Auf einen Blick") ───────────────────────────
+    summary: list[str] = []
+
+    # Schedule
+    if tom_lessons:
+        seen = set()
+        unique = [s for s in regular_subjects if not (s in seen or seen.add(s))]
+        subj_str = ", ".join(unique)
+
+        alerts = []
+        if cancellations:
+            alerts.append(f"**{len(cancellations)}x Entfall** ({', '.join(cancellations)})")
+        if substitution_subjects:
+            alerts.append(f"{len(substitution_subjects)}x Vertretung ({', '.join(substitution_subjects)})")
+
+        if alerts:
+            summary.append(f"Stundenplan {wd}: {'; '.join(alerts)}, {subj_str}")
+        else:
+            summary.append(f"Stundenplan {wd}: {subj_str}")
+    else:
+        summary.append(f"**Kein Unterricht** am {wd}")
+
+    # Exams
+    if exam_list:
+        summary.append(
+            f"**{len(exam_list)} Klausur{'en' if len(exam_list) != 1 else ''} diese Woche**"
+        )
+
+    # Homework
+    if hw_list:
+        summary.append(f"**{len(hw_list)} Hausaufgaben** eingetragen")
+    else:
+        summary.append("Keine Hausaufgaben eingetragen")
+
+    # Messages
+    if unread:
+        summary.append(f"**{len(unread)} ungelesene Nachricht{'en' if len(unread) != 1 else ''}**")
+
+    # Absences
+    unexcused = [a for a in absence_list if not a.get("isExcused", True)]
+    if unexcused:
+        summary.append(f"Fehlzeiten: {len(unexcused)} unentschuldigte Eintraege")
+
+    lines.append("### Auf einen Blick")
+    for b in summary:
+        lines.append(f"- {b}")
+    lines.append("")
+
+    # ── Messages detail ───────────────────────────────────────
+    lines.append(f"### Neue Nachrichten ({len(unread)})")
+    if unread:
+        for m in unread:
+            subject = m.get("subject", m.get("title", "?"))
+            lines.append(f"- **{subject}**")
+    else:
+        lines.append("- Keine ungelesenen Nachrichten")
+    lines.append("")
+
+    # ── Timetable detail ──────────────────────────────────────
+    lines.append(f"### Stundenplan {wd} {tom_str}")
+    if tom_lessons:
+        period = 0
+        for lesson in tom_lessons:
+            period += 1
+            subjects = lesson.get("su", [])
+            subj = subjects[0].get("name", "?") if subjects else "?"
+            teachers = lesson.get("te", [])
+            teacher = teachers[0].get("name", "") if teachers else ""
+            rooms = lesson.get("ro", [])
+            room = rooms[0].get("name", "") if rooms else ""
+
+            key = (lesson.get("date", 0), lesson.get("startTime", 0))
+            sub = sub_lookup.get(key)
+
+            if sub and sub.get("type") == "cancel":
+                lines.append(f"- **{period}. Stunde**: ~~{subj}~~ -- Entfall")
+            elif sub:
+                change = " (Vertretung)"
+                room_str = f", Raum {room}" if room else ""
+                teacher_str = f" ({teacher})" if teacher else ""
+                lines.append(f"- **{period}. Stunde**: {subj}{teacher_str}{room_str}{change}")
+            else:
+                room_str = f", Raum {room}" if room else ""
+                teacher_str = f" ({teacher})" if teacher else ""
+                lines.append(f"- **{period}. Stunde**: {subj}{teacher_str}{room_str}")
+    else:
+        lines.append("- Kein Unterricht")
+    lines.append("")
+
+    # ── Exams detail ──────────────────────────────────────────
+    lines.append("### Klausuren & Tests (naechste 7 Tage)")
+    if exam_list:
+        for ex in exam_list:
+            ex_date = ex.get("examDate", "?")
+            subj = ex.get("subject", ex.get("name", "?"))
+            ex_type = ex.get("examType", "Test")
+            lines.append(f"- **{ex_date}**: {subj} ({ex_type})")
+    else:
+        lines.append("- Keine anstehenden Arbeiten")
+    lines.append("")
+
+    # ── Homework detail ───────────────────────────────────────
+    lines.append("### Hausaufgaben (naechste 7 Tage)")
+    if hw_list:
+        for h in hw_list:
+            subj = h.get("subject", "?")
+            text = h.get("text", h.get("description", ""))
+            due = h.get("dueDate", "")
+            lines.append(f"- **{subj}**: {text}" + (f" (bis {due})" if due else ""))
+    else:
+        lines.append("- Keine Hausaufgaben eingetragen")
+    lines.append("")
+
+    # ── Absences detail ───────────────────────────────────────
+    lines.append("### Fehlzeiten")
+    if absence_list:
+        for a in absence_list:
+            status = "entschuldigt" if a.get("isExcused", False) else "unentschuldigt"
+            a_date = a.get("date", a.get("startDate", "?"))
+            lines.append(f"- {a_date}: {status}")
+    else:
+        lines.append("- Keine Fehlzeiten")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+@mcp.tool(
+    name="untis_daily_report",
+    annotations={
+        "title": "Daily Parent Briefing",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
+async def daily_report(ctx: Context) -> str:
+    """Generate a daily parent briefing.
+
+    The report includes:
+    - Unread messages
+    - Tomorrow's class schedule (next school day, skips weekends)
+    - Exams and tests in the next 7 days
+    - Homework
+    - Absences
+
+    No parameters needed -- automatically picks the right dates.
+
+    Returns:
+        str: Markdown-formatted daily briefing.
+    """
+    client = _get_client(ctx)
+    await client.ensure_authenticated()
+
+    if client.person_id is None:
+        return "Kein Schueler-Profil gefunden."
+
+    today = date.today()
+    tomorrow = _next_school_day(today)
+    exam_end = (today + timedelta(days=7)).isoformat()
+
+    # Fetch all data
+    try:
+        timetable = await client.get_timetable(
+            client.person_id, client.person_type or 5,
+            tomorrow.isoformat(), tomorrow.isoformat(),
+        )
+    except Exception:
+        timetable = []
+
+    try:
+        substitutions = await client.get_substitutions(
+            tomorrow.isoformat(), tomorrow.isoformat(),
+        )
+    except Exception:
+        substitutions = []
+
+    try:
+        homework = await client.get_homework(
+            today.isoformat(), exam_end,
+        )
+    except Exception:
+        homework = {}
+
+    try:
+        exams = await client.get_exams(
+            today.isoformat(), exam_end,
+        )
+    except Exception:
+        exams = {}
+
+    try:
+        absences = await client.get_absences(
+            today.isoformat(), exam_end,
+        )
+    except Exception:
+        absences = {}
+
+    try:
+        messages = await client.get_messages()
+    except Exception:
+        messages = {}
+
+    # Build report
+    parts: list[str] = []
+    parts.append(f"# Eltern-Briefing ({today.strftime('%d.%m.%Y')})")
+    parts.append("")
+    parts.append(_format_daily_report(
+        client.person_id, client.person_type or 5,
+        tomorrow, timetable, substitutions,
+        homework, exams, absences, messages,
+    ))
+
+    return "\n".join(parts)
+
+
 # ── Entry point ─────────────────────────────────────────────────
 
 
