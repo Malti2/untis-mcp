@@ -20,7 +20,7 @@ from .api import WebUntisClient, WebUntisAPIError
 
 
 @asynccontextmanager
-async def app_lifespan():
+async def app_lifespan(app):
     server = os.environ.get("WEBUNTIS_SERVER", "")
     school = os.environ.get("WEBUNTIS_SCHOOL", "")
     username = os.environ.get("WEBUNTIS_USER", "")
