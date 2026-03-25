@@ -45,7 +45,7 @@ mcp = FastMCP("untis_mcp", lifespan=app_lifespan)
 
 
 def _get_client(ctx: Context) -> WebUntisClient:
-    return ctx.request_context.lifespan_state["client"]
+    return ctx.request_context.lifespan_context["client"]
 
 
 def _format_json(data: Any) -> str:
@@ -64,10 +64,15 @@ def _next_school_day(today: date) -> date:
 
 
 def _format_untis_date(d: Any) -> str:
-    """Format a YYYYMMDD integer or string to DD.MM.YYYY."""
+    """Format a YYYYMMDD integer or string to Weekday, DD.MM.YYYY."""
     s = str(d)
     if len(s) == 8 and s.isdigit():
-        return f"{s[6:8]}.{s[4:6]}.{s[0:4]}"
+        try:
+            parsed = date(int(s[0:4]), int(s[4:6]), int(s[6:8]))
+            wd = WEEKDAYS_DE[parsed.weekday()]
+            return f"{wd}, {s[6:8]}.{s[4:6]}.{s[0:4]}"
+        except ValueError:
+            pass
     return s
 
 
