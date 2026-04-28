@@ -623,8 +623,9 @@ async function handleRpc(req: Request): Promise<Response> {
 
 export default async function handler(req: Request): Promise<Response> {
   const url = new URL(req.url);
+  const normalizedPath = url.pathname.replace(//+$/, "") || "/";
 
-  if (req.method === "GET" && url.pathname === "/api/mcp") {
+  if (req.method === "GET" && normalizedPath === "/api/mcp") {
     return new Response(JSON.stringify({ status: "ok" }), {
       headers: jsonHeaders(),
     });
@@ -647,7 +648,7 @@ export default async function handler(req: Request): Promise<Response> {
   if (req.method !== "POST") {
     return new Response("Method Not Allowed", { status: 405, headers: textHeaders({ allow: "GET, POST" }) });
   }
-  if (url.pathname !== "/api/mcp") {
+  if (normalizedPath !== "/api/mcp") {
     return new Response("Not Found", { status: 404, headers: textHeaders() });
   }
   return handleRpc(req);
