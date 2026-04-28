@@ -117,7 +117,7 @@ const API_KEY_ENV_NAMES = ["UNTISAPIKEY", "UNTIS_API_KEY"] as const;
 function normalizeAuthHeader(value: string | null): string {
   const trimmed = value?.trim() ?? "";
   if (!trimmed) return "";
-  const bearerMatch = trimmed.match(/^Bearers+(.+)$/i);
+  const bearerMatch = trimmed.match(/^Bearer\s+(.+)$/i);
   return bearerMatch ? bearerMatch[1].trim() : trimmed;
 }
 
@@ -180,15 +180,19 @@ function logMismatch(label: string, expected: string, provided: string): void {
 
 function isAuthorized(req: Request): boolean {
   const expected = getExpectedApiKey();
+  const url = new URL(req.url);
   const xApiKey = req.headers.get("x-api-key");
+  const queryKey = url.searchParams.get("key");
   const authHeader = req.headers.get("authorization");
 
   console.log("untis-mcp auth debug", {
     headerKeys: Array.from(req.headers.keys()),
     hasUntisApiKey: Boolean(expected),
     xApiKeyPresent: Boolean(xApiKey),
+    queryKeyPresent: Boolean(queryKey),
     authorizationPresent: Boolean(authHeader),
     xApiKeyLength: xApiKey?.length ?? 0,
+    queryKeyLength: queryKey?.length ?? 0,
     authHeaderLength: authHeader?.length ?? 0,
   });
 
@@ -198,6 +202,12 @@ function isAuthorized(req: Request): boolean {
   if (normalizedXApiKey) {
     if (normalizedXApiKey === expected) return true;
     logMismatch("x-api-key", expected, normalizedXApiKey);
+  }
+
+  const normalizedQueryKey = queryKey?.normalize("NFKC").replace(/[​-‍﻿]/g, "").trim();
+  if (normalizedQueryKey) {
+    if (normalizedQueryKey === expected) return true;
+    logMismatch("query:key", expected, normalizedQueryKey);
   }
 
   if (!authHeader) return false;
