@@ -602,6 +602,13 @@ async function handleRpc(req: Request): Promise<Response> {
 
 export default async function handler(req: Request): Promise<Response> {
   const url = new URL(req.url);
+
+  if (req.method === "GET" && url.pathname === "/api/mcp") {
+    return new Response(JSON.stringify({ ok: true, endpoint: "/api/mcp", authRequired: false }), {
+      headers: { "content-type": "application/json", "cache-control": "no-store, max-age=0", "vary": "x-api-key, authorization" },
+    });
+  }
+
   const xApiKey = req.headers.get("x-api-key");
   const authHeader = req.headers.get("authorization");
   const expectedApiKey = getExpectedApiKey();
@@ -615,9 +622,6 @@ export default async function handler(req: Request): Promise<Response> {
       xApiKeyLength: xApiKey?.length ?? 0,
       authHeaderLength: authHeader?.length ?? 0,
     });
-  }
-  if (req.method === "GET") {
-    return new Response(JSON.stringify({ ok: true, endpoint: "/api/mcp" }), { headers: { "content-type": "application/json", "cache-control": "no-store, max-age=0", "vary": "x-api-key, authorization" } });
   }
   if (req.method !== "POST") {
     return new Response("Method Not Allowed", { status: 405, headers: { allow: "GET, POST", "cache-control": "no-store, max-age=0", "vary": "x-api-key, authorization" } });
