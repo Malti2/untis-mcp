@@ -572,9 +572,9 @@ async function handleRpc(req: Request): Promise<Response> {
 
 export default async function handler(req: Request): Promise<Response> {
   const url = new URL(req.url);
-  const auth = isAuthorized(req);
-  if (!auth.authorized) {
-    return unauthorizedResponse(auth.debug);
+  const authorized = isAuthorized(req);
+  if (!authorized) {
+    return unauthorizedResponse({ reason: "missing or mismatched API key" });
   }
   if (req.method === "GET") {
     return new Response(JSON.stringify({ ok: true, endpoint: "/api/mcp" }), { headers: { "content-type": "application/json", "cache-control": "no-store, max-age=0", "vary": "x-api-key, authorization" } });
