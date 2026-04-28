@@ -106,7 +106,10 @@ const TOOL_DEFS = [
 ] as const;
 
 function env(name: string): string | undefined {
-  return (globalThis as any).Netlify?.env?.get?.(name);
+  const netlifyEnv = (globalThis as any).Netlify?.env?.get?.(name);
+  if (typeof netlifyEnv === "string" && netlifyEnv.length > 0) return netlifyEnv;
+  const processEnv = typeof process !== "undefined" ? process.env?.[name] : undefined;
+  return typeof processEnv === "string" && processEnv.length > 0 ? processEnv : undefined;
 }
 
 const API_KEY_ENV_NAMES = ["UNTISAPIKEY", "UNTIS_API_KEY"] as const;
@@ -121,21 +124,36 @@ function normalizeAuthHeader(value: string | null): string {
 function getExpectedApiKey(): string | undefined {
   for (const name of API_KEY_ENV_NAMES) {
     const value = env(name);
-    if (value?.trim()) return value.trim();
+    if (typeof value === "string") {
+      const normalized = value.normalize("NFKC").replace(/[​-‍﻿]/g, "").trim();
+      if (normalized) return normalized;
+    }
   }
   return undefined;
 }
 
 function isAuthorized(req: Request): boolean {
   const expected = getExpectedApiKey();
+  const xApiKey = req.headers.get("x-api-key");
+  const authHeader = req.headers.get("authorization");
+
+  console.log("untis-mcp auth debug", {
+    headerKeys: Array.from(req.headers.keys()),
+    hasUntisApiKey: Boolean(expected),
+    xApiKeyPresent: Boolean(xApiKey),
+    authorizationPresent: Boolean(authHeader),
+    xApiKeyLength: xApiKey?.length ?? 0,
+    authHeaderLength: authHeader?.length ?? 0,
+  });
+
   if (!expected) return false;
 
-  const apiKey = req.headers.get("x-api-key");
-  if (apiKey?.trim() === expected) return true;
+  const normalizedXApiKey = xApiKey?.normalize("NFKC").replace(/[​-‍﻿]/g, "").trim();
+  if (normalizedXApiKey && normalizedXApiKey === expected) return true;
 
-  const authHeader = req.headers.get("authorization");
   if (!authHeader) return false;
-  return normalizeAuthHeader(authHeader) === expected;
+  const normalizedAuth = normalizeAuthHeader(authHeader).normalize("NFKC").replace(/[​-‍﻿]/g, "").trim();
+  return normalizedAuth === expected;
 }
 
 function unauthorizedResponse(): Response {
