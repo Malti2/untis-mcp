@@ -156,8 +156,8 @@ function isAuthorized(req: Request): boolean {
   return normalizedAuth === expected;
 }
 
-function unauthorizedResponse(): Response {
-  return new Response(JSON.stringify({ error: "Unauthorized" }), {
+function unauthorizedResponse(debug: Record<string, unknown>): Response {
+  return new Response(JSON.stringify({ error: "Unauthorized", debug }), {
     status: 401,
     headers: { "content-type": "application/json", "cache-control": "no-store, max-age=0", "vary": "x-api-key, authorization" },
   });
@@ -572,8 +572,9 @@ async function handleRpc(req: Request): Promise<Response> {
 
 export default async function handler(req: Request): Promise<Response> {
   const url = new URL(req.url);
-  if (!isAuthorized(req)) {
-    return unauthorizedResponse();
+  const auth = isAuthorized(req);
+  if (!auth.authorized) {
+    return unauthorizedResponse(auth.debug);
   }
   if (req.method === "GET") {
     return new Response(JSON.stringify({ ok: true, endpoint: "/api/mcp" }), { headers: { "content-type": "application/json", "cache-control": "no-store, max-age=0", "vary": "x-api-key, authorization" } });
