@@ -109,7 +109,7 @@ function env(name: string): string | undefined {
   return (globalThis as any).Netlify?.env?.get?.(name);
 }
 
-const API_KEY_ENV_NAME = "UNTIS_API_KEY";
+const API_KEY_ENV_NAMES = ["UNTISAPIKEY", "UNTIS_API_KEY"] as const;
 
 function normalizeAuthHeader(value: string | null): string {
   const trimmed = value?.trim() ?? "";
@@ -118,8 +118,16 @@ function normalizeAuthHeader(value: string | null): string {
   return bearerMatch ? bearerMatch[1].trim() : trimmed;
 }
 
+function getExpectedApiKey(): string | undefined {
+  for (const name of API_KEY_ENV_NAMES) {
+    const value = env(name);
+    if (value?.trim()) return value.trim();
+  }
+  return undefined;
+}
+
 function isAuthorized(req: Request): boolean {
-  const expected = env(API_KEY_ENV_NAME);
+  const expected = getExpectedApiKey();
   if (!expected) return false;
 
   const apiKey = req.headers.get("x-api-key");
