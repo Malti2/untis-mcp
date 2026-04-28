@@ -132,6 +132,31 @@ function getExpectedApiKey(): string | undefined {
   return undefined;
 }
 
+function logMismatch(label: string, expected: string, provided: string): void {
+  const max = Math.max(expected.length, provided.length);
+  for (let i = 0; i < max; i += 1) {
+    if (expected[i] !== provided[i]) {
+      console.log("untis-mcp auth mismatch", {
+        label,
+        mismatchAtIndex: i,
+        expectedChar: expected[i] ?? "<eof>",
+        providedChar: provided[i] ?? "<eof>",
+        expectedLength: expected.length,
+        providedLength: provided.length,
+      });
+      return;
+    }
+  }
+  console.log("untis-mcp auth mismatch", {
+    label,
+    mismatchAtIndex: Math.max(expected.length, provided.length),
+    expectedChar: "<eof>",
+    providedChar: "<eof>",
+    expectedLength: expected.length,
+    providedLength: provided.length,
+  });
+}
+
 function isAuthorized(req: Request): boolean {
   const expected = getExpectedApiKey();
   const xApiKey = req.headers.get("x-api-key");
@@ -149,11 +174,16 @@ function isAuthorized(req: Request): boolean {
   if (!expected) return false;
 
   const normalizedXApiKey = xApiKey?.normalize("NFKC").replace(/[​-‍﻿]/g, "").trim();
-  if (normalizedXApiKey && normalizedXApiKey === expected) return true;
+  if (normalizedXApiKey) {
+    if (normalizedXApiKey === expected) return true;
+    logMismatch("x-api-key", expected, normalizedXApiKey);
+  }
 
   if (!authHeader) return false;
   const normalizedAuth = normalizeAuthHeader(authHeader).normalize("NFKC").replace(/[​-‍﻿]/g, "").trim();
-  return normalizedAuth === expected;
+  if (normalizedAuth === expected) return true;
+  if (normalizedAuth) logMismatch("authorization", expected, normalizedAuth);
+  return false;
 }
 
 function unauthorizedResponse(debug: Record<string, unknown>): Response {
