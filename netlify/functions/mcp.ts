@@ -589,3 +589,5 @@ export default async function handler(req: Request): Promise<Response> {
 }
 
 export const config = { path: "/api/mcp" };
+
+// cache-bust
