@@ -623,7 +623,7 @@ async function handleRpc(req: Request): Promise<Response> {
 
 export default async function handler(req: Request): Promise<Response> {
   const url = new URL(req.url);
-  const normalizedPath = url.pathname.replace(//+$/, "") || "/";
+  const normalizedPath = url.pathname.replace(/\/+$/, "") || "/";
 
   if (req.method === "GET" && normalizedPath === "/api/mcp") {
     return new Response(JSON.stringify({ status: "ok" }), {
