@@ -109,6 +109,34 @@ function env(name: string): string | undefined {
   return (globalThis as any).Netlify?.env?.get?.(name);
 }
 
+const API_KEY_ENV_NAME = "UNTIS_API_KEY";
+
+function normalizeAuthHeader(value: string | null): string {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) return "";
+  const bearerMatch = trimmed.match(/^Bearers+(.+)$/i);
+  return bearerMatch ? bearerMatch[1].trim() : trimmed;
+}
+
+function isAuthorized(req: Request): boolean {
+  const expected = env(API_KEY_ENV_NAME);
+  if (!expected) return false;
+
+  const apiKey = req.headers.get("x-api-key");
+  if (apiKey?.trim() === expected) return true;
+
+  const authHeader = req.headers.get("authorization");
+  if (!authHeader) return false;
+  return normalizeAuthHeader(authHeader) === expected;
+}
+
+function unauthorizedResponse(): Response {
+  return new Response(JSON.stringify({ error: "Unauthorized" }), {
+    status: 401,
+    headers: { "content-type": "application/json" },
+  });
+}
+
 function textResult(text: string, isError = false) {
   return { content: [{ type: "text", text }], ...(isError ? { isError: true } : {}) };
 }
@@ -518,6 +546,9 @@ async function handleRpc(req: Request): Promise<Response> {
 
 export default async function handler(req: Request): Promise<Response> {
   const url = new URL(req.url);
+  if (!isAuthorized(req)) {
+    return unauthorizedResponse();
+  }
   if (req.method === "GET") {
     return new Response(JSON.stringify({ ok: true, endpoint: "/api/mcp" }), { headers: { "content-type": "application/json" } });
   }
