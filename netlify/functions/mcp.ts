@@ -159,7 +159,7 @@ function isAuthorized(req: Request): boolean {
 function unauthorizedResponse(): Response {
   return new Response(JSON.stringify({ error: "Unauthorized" }), {
     status: 401,
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", "cache-control": "no-store, max-age=0", "vary": "x-api-key, authorization" },
   });
 }
 
@@ -546,19 +546,19 @@ async function handleRpc(req: Request): Promise<Response> {
           serverInfo: { name: "untis-mcp", version: "0.1.0" },
           capabilities: { tools: {} },
         },
-      }), { headers: { "content-type": "application/json" } });
+      }), { headers: { "content-type": "application/json", "cache-control": "no-store, max-age=0", "vary": "x-api-key, authorization" } });
     }
     if (method === "tools/list") {
-      return new Response(JSON.stringify({ jsonrpc: "2.0", id, result: { tools: TOOL_DEFS } }), { headers: { "content-type": "application/json" } });
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id, result: { tools: TOOL_DEFS } }), { headers: { "content-type": "application/json", "cache-control": "no-store, max-age=0", "vary": "x-api-key, authorization" } });
     }
     if (method === "tools/call") {
       const name = String((params as any)?.name ?? "");
       const args = ((params as any)?.arguments ?? {}) as Record<string, unknown>;
       const result = await callTool(name, args);
-      return new Response(JSON.stringify({ jsonrpc: "2.0", id, result }), { headers: { "content-type": "application/json" } });
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id, result }), { headers: { "content-type": "application/json", "cache-control": "no-store, max-age=0", "vary": "x-api-key, authorization" } });
     }
     if (method === "ping") {
-      return new Response(JSON.stringify({ jsonrpc: "2.0", id, result: {} }), { headers: { "content-type": "application/json" } });
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id, result: {} }), { headers: { "content-type": "application/json", "cache-control": "no-store, max-age=0", "vary": "x-api-key, authorization" } });
     }
     return new Response(JSON.stringify({ jsonrpc: "2.0", id, error: { code: -32601, message: `Method not found: ${method}` } }), { status: 404, headers: { "content-type": "application/json" } });
   } catch (error) {
@@ -566,7 +566,7 @@ async function handleRpc(req: Request): Promise<Response> {
       jsonrpc: "2.0",
       id,
       error: { code: -32000, message: error instanceof Error ? error.message : String(error) },
-    }), { status: 500, headers: { "content-type": "application/json" } });
+    }), { status: 500, headers: { "content-type": "application/json", "cache-control": "no-store, max-age=0", "vary": "x-api-key, authorization" } });
   }
 }
 
@@ -576,13 +576,13 @@ export default async function handler(req: Request): Promise<Response> {
     return unauthorizedResponse();
   }
   if (req.method === "GET") {
-    return new Response(JSON.stringify({ ok: true, endpoint: "/api/mcp" }), { headers: { "content-type": "application/json" } });
+    return new Response(JSON.stringify({ ok: true, endpoint: "/api/mcp" }), { headers: { "content-type": "application/json", "cache-control": "no-store, max-age=0", "vary": "x-api-key, authorization" } });
   }
   if (req.method !== "POST") {
-    return new Response("Method Not Allowed", { status: 405, headers: { allow: "GET, POST" } });
+    return new Response("Method Not Allowed", { status: 405, headers: { allow: "GET, POST", "cache-control": "no-store, max-age=0", "vary": "x-api-key, authorization" } });
   }
   if (url.pathname !== "/api/mcp") {
-    return new Response("Not Found", { status: 404 });
+    return new Response("Not Found", { status: 404, headers: { "cache-control": "no-store, max-age=0", "vary": "x-api-key, authorization" } });
   }
   return handleRpc(req);
 }
